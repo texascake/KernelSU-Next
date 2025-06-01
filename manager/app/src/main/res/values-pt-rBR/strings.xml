@@ -100,6 +100,7 @@
     <string name="proceed">Prosseguir</string>
     <string name="cancel">Cancelar</string>
     <string name="later">Mais tarde</string>
+    <string name="lkm_warning_message">O patch LKM depende de componentes de código fechado. Deseja continuar?</string>
     <string name="home_next_kernelsu">🔥 Compilação next</string>
     <string name="home_next_kernelsu_repo">https://github.com/KernelSU-Next/KernelSU-Next</string>
     <string name="home_next_kernelsu_body">Branch next experimental. Confira no GitHub!</string>
