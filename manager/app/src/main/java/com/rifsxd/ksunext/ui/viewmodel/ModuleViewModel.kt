@@ -46,7 +46,8 @@ class ModuleViewModel : ViewModel() {
         val hasWebUi: Boolean,
         val hasActionScript: Boolean,
         val dirId: String,
-        val size: Long
+        val size: Long,
+        val banner: String
     )
 
     data class ModuleUpdateInfo(
@@ -63,11 +64,15 @@ class ModuleViewModel : ViewModel() {
 
     var sortAToZ by mutableStateOf(false)
     var sortZToA by mutableStateOf(false)
+    var sortSizeLowToHigh by mutableStateOf(false)
+    var sortSizeHighToLow by mutableStateOf(false)
 
     val moduleList by derivedStateOf {
         val comparator = when {
             sortAToZ -> compareBy<ModuleInfo> { it.name.lowercase() }
             sortZToA -> compareByDescending<ModuleInfo> { it.name.lowercase() }
+            sortSizeLowToHigh -> compareBy<ModuleInfo> { it.size }
+            sortSizeHighToLow -> compareByDescending<ModuleInfo> { it.size }
             else -> compareBy<ModuleInfo> { it.dirId }
         }.thenBy(Collator.getInstance(Locale.getDefault()), ModuleInfo::id)
 
@@ -138,7 +143,8 @@ class ModuleViewModel : ViewModel() {
                                 obj.optBoolean("web"),
                                 obj.optBoolean("action"),
                                 dirId,
-                                size
+                                size,
+                                obj.optString("banner")
                             )
                         }.toList()
                     isNeedRefresh = false
