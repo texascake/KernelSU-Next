@@ -9,10 +9,14 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,6 +77,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -84,7 +89,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -290,8 +294,11 @@ fun ModuleScreen(navigator: DestinationsNavigator) {
                 val confirmTitle = stringResource(R.string.module)
                 var zipUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
                 val confirmDialog = rememberConfirmDialog(onConfirm = {
-                    navigator.navigate(FlashScreenDestination(FlashIt.FlashModules(zipUris)))
-                    viewModel.markNeedRefresh()
+                    if (viewModel.zipUris.isNotEmpty()) {
+                        navigator.navigate(FlashScreenDestination(FlashIt.FlashModules(viewModel.zipUris)))
+                        viewModel.clearZipUris()
+                        viewModel.markNeedRefresh()
+                    }
                 })
                 val selectZipLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
@@ -310,6 +317,10 @@ fun ModuleScreen(navigator: DestinationsNavigator) {
                     } else {
                         data.data?.let { uris.add(it) }
                     }
+
+                    if (uris.isEmpty()) return@rememberLauncherForActivityResult
+
+                    viewModel.updateZipUris(uris)
 
                     // Show confirm dialog with selected zip file(s) name(s)
                     val moduleNames =
@@ -436,6 +447,8 @@ private fun ModuleList(
 
     val loadingDialog = rememberLoadingDialog()
     val confirmDialog = rememberConfirmDialog()
+
+    var expandedModuleId by rememberSaveable { mutableStateOf<String?>(null) }
 
     suspend fun onModuleUpdate(
         module: ModuleViewModel.ModuleInfo,
@@ -659,6 +672,10 @@ private fun ModuleList(
                             },
                             onClick = {
                                 onClickModule(it.dirId, it.name, it.hasWebUi)
+                            },
+                            expanded = expandedModuleId == module.id,
+                            onExpandToggle = {
+                                expandedModuleId = if (expandedModuleId == module.id) null else module.id
                             }
                         )
 
@@ -684,9 +701,18 @@ fun ModuleItem(
     onCheckChanged: (Boolean) -> Unit,
     onUpdate: (ModuleViewModel.ModuleInfo) -> Unit,
     onClick: (ModuleViewModel.ModuleInfo) -> Unit,
+    expanded: Boolean,
+    onExpandToggle: () -> Unit,
 ) {
+    val viewModel = viewModel<ModuleViewModel>()
+
     ElevatedCard(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(
+                onClick = onExpandToggle
+            )
     ) {
         Box(
             modifier = Modifier
@@ -694,11 +720,10 @@ fun ModuleItem(
         ) {
             val context = LocalContext.current
             val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            val useLagacyUI = prefs.getBoolean("use_legacyui", false)
 
             val useBanner = prefs.getBoolean("use_banner", true)
 
-            if (useBanner && !useLagacyUI && module.banner.isNotEmpty()) {
+            if (useBanner && module.banner.isNotEmpty()) {
                 val isDark = isSystemInDarkTheme()
                 val colorScheme = MaterialTheme.colorScheme
                 val context = LocalContext.current
@@ -769,10 +794,7 @@ fun ModuleItem(
                 }
             }
             Column {
-                val textDecoration = if (!module.remove) null else TextDecoration.LineThrough
                 val interactionSource = remember { MutableInteractionSource() }
-                val indication = LocalIndication.current
-                val viewModel = viewModel<ModuleViewModel>()
 
                 var developerOptionsEnabled by rememberSaveable {
                     mutableStateOf(
@@ -784,112 +806,173 @@ fun ModuleItem(
                     developerOptionsEnabled = prefs.getBoolean("enable_developer_options", false)
                 }
 
-                if (useLagacyUI) {
-                    Column(
-                        modifier = Modifier
-                            .padding(22.dp, 18.dp, 22.dp, 12.dp)
+                Column(
+                    modifier = Modifier
+                        .padding(22.dp, 18.dp, 22.dp, 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                        val moduleVersion = stringResource(id = R.string.module_version)
+                        val moduleAuthor = stringResource(id = R.string.module_author)
+                        val moduleId = stringResource(id = R.string.module_id)
+                        val moduleVersionCode = stringResource(id = R.string.module_version_code)
+                        val moduleUpdateJson = stringResource(id = R.string.module_update_json)
+                        val moduleUpdateJsonEmpty = stringResource(id = R.string.module_update_json_empty)
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(0.8f)
                         ) {
-                            val moduleVersion = stringResource(id = R.string.module_version)
-                            val moduleAuthor = stringResource(id = R.string.module_author)
-                            val moduleId = stringResource(id = R.string.module_id)
-                            val moduleVersionCode = stringResource(id = R.string.module_version_code)
-                            val moduleUpdateJson = stringResource(id = R.string.module_update_json)
-                            val moduleUpdateJsonEmpty = stringResource(id = R.string.module_update_json_empty)
-
-                            Column(
-                                modifier = Modifier.fillMaxWidth(0.8f)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = module.name,
-                                    fontSize = MaterialTheme.typography.titleMedium.fontSize,
-                                    fontWeight = FontWeight.SemiBold,
-                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                    fontFamily = MaterialTheme.typography.titleMedium.fontFamily,
-                                    textDecoration = textDecoration,
-                                )
-
-                                Text(
-                                    text = "$moduleVersion: ${module.version}",
-                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                    textDecoration = textDecoration
-                                )
-
-                                Text(
-                                    text = "$moduleAuthor: ${module.author}",
-                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                    textDecoration = textDecoration
-                                )
-
-                                if (developerOptionsEnabled) {
-
-                                    Text(
-                                        text = "$moduleId: ${module.id}",
-                                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                        textDecoration = textDecoration
+                                LabelItem(
+                                    text = formatSize(module.size),
+                                    style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
-
-                                    Text(
-                                        text = "$moduleVersionCode: ${module.versionCode}",
-                                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                        textDecoration = textDecoration
+                                )
+                                if (module.remove) {
+                                    LabelItem(
+                                        text = stringResource(R.string.uninstall),
+                                        style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                        )
                                     )
-
-                                    Text(
-                                        text = if (module.updateJson.isNotEmpty()) "$moduleUpdateJson: ${module.updateJson}" else "$moduleUpdateJson: $moduleUpdateJsonEmpty",
-                                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                        textDecoration = textDecoration
+                                }
+                                if (updateUrl.isNotEmpty() && !module.remove && !module.update) {
+                                    LabelItem(
+                                        text = stringResource(R.string.module_update),
+                                        style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
+                                            containerColor = MaterialTheme.colorScheme.onTertiary,
+                                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
                                     )
+                                }
+                                if (!module.remove) {
+                                    if (module.update) {
+                                        LabelItem(
+                                            text = stringResource(R.string.module_updated),
+                                            style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
+                                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                            )
+                                        )
+                                    }
+                                }
+                                if (module.enabled && !module.remove) {
+                                    if (module.hasWebUi) {
+                                        LabelItem(
+                                            text = stringResource(R.string.webui),
+                                            style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        )
+                                    }
+                                    if (module.hasActionScript) {
+                                        LabelItem(
+                                            text = stringResource(R.string.action),
+                                            style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
+                                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        )
+                                    }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                            ) {
-                                Switch(
-                                    enabled = !module.update,
-                                    checked = module.enabled,
-                                    onCheckedChange = onCheckChanged,
-                                    interactionSource = if (!module.hasWebUi) interactionSource else null
+                            Text(
+                                text = module.name,
+                                fontSize = MaterialTheme.typography.titleMedium.fontSize,
+                                fontWeight = FontWeight.SemiBold,
+                                lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                                fontFamily = MaterialTheme.typography.titleMedium.fontFamily
+                            )
+
+                            Text(
+                                text = "$moduleVersion: ${module.version}",
+                                fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                                lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                                fontFamily = MaterialTheme.typography.bodySmall.fontFamily
+                            )
+
+                            Text(
+                                text = "$moduleAuthor: ${module.author}",
+                                fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                                lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                                fontFamily = MaterialTheme.typography.bodySmall.fontFamily
+                            )
+
+                            if (developerOptionsEnabled) {
+
+                                Text(
+                                    text = "$moduleId: ${module.id}",
+                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily
+                                )
+
+                                Text(
+                                    text = "$moduleVersionCode: ${module.versionCode}",
+                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily
+                                )
+
+                                Text(
+                                    text = if (module.updateJson.isNotEmpty()) "$moduleUpdateJson: ${module.updateJson}" else "$moduleUpdateJson: $moduleUpdateJsonEmpty",
+                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.weight(1f))
 
-                        Text(
-                            text = module.description,
-                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                            fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                            lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                            fontWeight = MaterialTheme.typography.bodySmall.fontWeight,
-                            overflow = TextOverflow.Ellipsis,
-                            maxLines = 4,
-                            textDecoration = textDecoration
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Switch(
+                                enabled = !module.update,
+                                checked = module.enabled,
+                                onCheckedChange = onCheckChanged,
+                                interactionSource = if (!module.hasWebUi) interactionSource else null
+                            )
+                        }
+                    }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                        HorizontalDivider(thickness = Dp.Hairline)
+                    Text(
+                        text = module.description,
+                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
+                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                        fontWeight = MaterialTheme.typography.bodySmall.fontWeight,
+                        overflow = TextOverflow.Ellipsis,
+                        maxLines = 4
+                    )
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
 
+                    if (expanded) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = fadeIn() + expandVertically(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
                         Row(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -906,7 +989,7 @@ fun ModuleItem(
                                 ) {
                                     Icon(
                                         modifier = Modifier.size(20.dp),
-                                        imageVector = Icons.Outlined.PlayArrow,
+                                        imageVector = Icons.Outlined.Terminal,
                                         contentDescription = null
                                     )
                                     if (!module.hasWebUi && updateUrl.isEmpty()) {
@@ -1018,254 +1101,6 @@ fun ModuleItem(
                             }
                         }
                     }
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .padding(22.dp, 18.dp, 22.dp, 12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            val moduleVersion = stringResource(id = R.string.module_version)
-                            val moduleAuthor = stringResource(id = R.string.module_author)
-                            val moduleId = stringResource(id = R.string.module_id)
-                            val moduleVersionCode = stringResource(id = R.string.module_version_code)
-                            val moduleUpdateJson = stringResource(id = R.string.module_update_json)
-                            val moduleUpdateJsonEmpty = stringResource(id = R.string.module_update_json_empty)
-
-                            Column(
-                                modifier = Modifier.fillMaxWidth(0.8f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    LabelItem(
-                                        text = formatSize(module.size),
-                                        style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                    )
-                                    LabelItem(
-                                        text = if (module.enabled) stringResource(R.string.enabled) else stringResource(R.string.disabled),
-                                        style = if (module.enabled)
-                                            com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy()
-                                        else
-                                            com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                                            )
-                                    )
-                                    if (module.remove) {
-                                        LabelItem(
-                                            text = stringResource(R.string.uninstalled),
-                                            style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                                            )
-                                        )
-                                    }
-                                    if (updateUrl.isNotEmpty() && !module.remove && !module.update) {
-                                        LabelItem(
-                                            text = stringResource(R.string.module_update),
-                                            style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                                containerColor = MaterialTheme.colorScheme.onTertiary,
-                                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                            )
-                                        )
-                                    }
-                                    if (!module.remove) {
-                                        if (module.update) {
-                                            LabelItem(
-                                                text = stringResource(R.string.module_updated),
-                                                style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                                )
-                                            )
-                                        }
-                                    }
-                                    if (!module.remove) {
-                                        if (module.hasWebUi) {
-                                            LabelItem(
-                                                text = stringResource(R.string.webui),
-                                                style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                                )
-                                            )
-                                        }
-                                        if (module.hasActionScript) {
-                                            LabelItem(
-                                                text = stringResource(R.string.action),
-                                                style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Text(
-                                    text = module.name,
-                                    fontSize = MaterialTheme.typography.titleMedium.fontSize,
-                                    fontWeight = FontWeight.SemiBold,
-                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                    fontFamily = MaterialTheme.typography.titleMedium.fontFamily,
-                                    textDecoration = textDecoration,
-                                )
-
-                                Text(
-                                    text = "$moduleVersion: ${module.version}",
-                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                    textDecoration = textDecoration
-                                )
-
-                                Text(
-                                    text = "$moduleAuthor: ${module.author}",
-                                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                    textDecoration = textDecoration
-                                )
-
-                                if (developerOptionsEnabled) {
-
-                                    Text(
-                                        text = "$moduleId: ${module.id}",
-                                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                        textDecoration = textDecoration
-                                    )
-
-                                    Text(
-                                        text = "$moduleVersionCode: ${module.versionCode}",
-                                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                        textDecoration = textDecoration
-                                    )
-
-                                    Text(
-                                        text = if (module.updateJson.isNotEmpty()) "$moduleUpdateJson: ${module.updateJson}" else "$moduleUpdateJson: $moduleUpdateJsonEmpty",
-                                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                                        textDecoration = textDecoration
-                                    )
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                            ) {
-                                var expanded by remember { mutableStateOf(false) }
-                                IconButton(onClick = { expanded = true }) {
-                                    Icon(
-                                        Icons.Filled.MoreVert,
-                                        contentDescription = "Module actions"
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = expanded,
-                                    onDismissRequest = { expanded = false }
-                                ) {
-                                    if (updateUrl.isNotEmpty() && !module.remove) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.module_update)) },
-                                            onClick = {
-                                                expanded = false
-                                                onUpdate(module)
-                                            }
-                                        )
-                                        HorizontalDivider()
-                                    }
-                                    
-                                    if (!module.remove) {
-                                        if (module.hasWebUi) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.webui)) },
-                                                onClick = {
-                                                    expanded = false
-                                                    onClick(module)
-                                                }
-                                            )
-                                        }
-                                        if (module.hasActionScript) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.action)) },
-                                                onClick = {
-                                                    expanded = false
-                                                    navigator.navigate(ExecuteModuleActionScreenDestination(module.dirId))
-                                                    viewModel.markNeedRefresh()
-                                                }
-                                            )
-                                        }
-
-                                        if (module.hasWebUi || module.hasActionScript ) {
-                                            HorizontalDivider()
-                                        }
-                                    }
-
-                                    if (!module.remove) {
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    if (module.enabled) stringResource(R.string.disable)
-                                                    else stringResource(R.string.enable)
-                                                )
-                                            },
-                                            onClick = {
-                                                expanded = false
-                                                onCheckChanged(!module.enabled)
-                                            }
-                                        )
-                                    }
-                                    if (module.remove) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.restore)) },
-                                            onClick = {
-                                                expanded = false
-                                                onRestore(module)
-                                            }
-                                        )
-                                    } else {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.uninstall)) },
-                                            onClick = {
-                                                expanded = false
-                                                onUninstall(module)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            text = module.description,
-                            fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                            fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                            lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                            fontWeight = MaterialTheme.typography.bodySmall.fontWeight,
-                            overflow = TextOverflow.Ellipsis,
-                            maxLines = 4,
-                            textDecoration = textDecoration
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-                    }
                 }
             }
         }
@@ -1304,5 +1139,5 @@ fun ModuleItemPreview() {
         size = 12345678L,
         banner = ""
     )
-    ModuleItem(EmptyDestinationsNavigator, module, "", {}, {}, {}, {}, {})
+    ModuleItem(EmptyDestinationsNavigator, module, "", {}, {}, {}, {}, {}, false, {})
 }
