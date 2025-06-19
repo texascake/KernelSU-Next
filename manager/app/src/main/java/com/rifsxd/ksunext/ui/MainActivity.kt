@@ -1,5 +1,7 @@
 package com.rifsxd.ksunext.ui
 
+import android.content.Intent
+import android.net.Uri
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
@@ -51,9 +53,12 @@ import com.rifsxd.ksunext.Natives
 import com.rifsxd.ksunext.ksuApp
 import com.rifsxd.ksunext.ui.screen.BottomBarDestination
 import com.rifsxd.ksunext.ui.theme.KernelSUTheme
+import com.rifsxd.ksunext.ui.util.*
 import com.rifsxd.ksunext.ui.util.LocalSnackbarHost
 import com.rifsxd.ksunext.ui.util.rootAvailable
 import com.rifsxd.ksunext.ui.util.install
+import com.rifsxd.ksunext.ui.util.isSuCompatDisabled
+import com.rifsxd.ksunext.ui.screen.FlashIt
 
 class MainActivity : ComponentActivity() {
 
@@ -70,6 +75,30 @@ class MainActivity : ComponentActivity() {
         val isManager = Natives.becomeManager(ksuApp.packageName)
         if (isManager) install()
 
+        val zipUri: Uri? = when (intent?.action) {
+            Intent.ACTION_VIEW, Intent.ACTION_SEND -> {
+                val uri = intent.data ?: intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                uri?.let {
+                    val name = when (it.scheme) {
+                        "file" -> it.lastPathSegment ?: ""
+                        "content" -> {
+                            contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                if (cursor.moveToFirst() && nameIndex != -1) {
+                                    cursor.getString(nameIndex)
+                                } else {
+                                    it.lastPathSegment ?: ""
+                                }
+                            } ?: (it.lastPathSegment ?: "")
+                        }
+                        else -> it.lastPathSegment ?: ""
+                    }
+                    if (name.lowercase().endsWith(".zip")) it else null
+                }
+            }
+            else -> null
+        }
+
         setContent {
             // Read AMOLED mode preference
             val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -81,6 +110,19 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val snackBarHostState = remember { SnackbarHostState() }
                 val currentDestination = navController.currentBackStackEntryAsState()?.value?.destination
+
+                val navigator = navController.rememberDestinationsNavigator()
+
+                LaunchedEffect(zipUri) {
+                    if (zipUri != null) {
+                        navigator.navigate(
+                            FlashScreenDestination(
+                                FlashIt.FlashModules(listOf(zipUri)),
+                                finishIntent = true
+                            )
+                        )
+                    }
+                }
 
                 val showBottomBar = when (currentDestination?.route) {
                     FlashScreenDestination.route -> false // Hide for FlashScreenDestination
@@ -126,39 +168,55 @@ private fun BottomBar(navController: NavHostController) {
     val navigator = navController.rememberDestinationsNavigator()
     val isManager = Natives.becomeManager(ksuApp.packageName)
     val fullFeatured = isManager && !Natives.requireNewKernel() && rootAvailable()
+    val suCompatDisabled = isSuCompatDisabled()
+    val suSFS = getSuSFS()
+    val susSUMode = susfsSUS_SU_Mode()
+
     NavigationBar(
         tonalElevation = 8.dp,
         windowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout).only(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
         )
     ) {
-        BottomBarDestination.entries.forEach { destination ->
-            if (!fullFeatured && destination.rootRequired) return@forEach
-            val isCurrentDestOnBackStack by navController.isRouteOnBackStackAsState(destination.direction)
-            NavigationBarItem(
-                selected = isCurrentDestOnBackStack,
-                onClick = {
-                    if (isCurrentDestOnBackStack) {
-                        navigator.popBackStack(destination.direction, false)
-                    }
-                    navigator.navigate(destination.direction) {
-                        popUpTo(NavGraphs.root) {
-                            saveState = true
-                        }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
-                icon = {
-                    if (isCurrentDestOnBackStack) {
-                        Icon(destination.iconSelected, stringResource(destination.label))
+        BottomBarDestination.entries
+            .filter {
+                // Hide SuperUser and Module when su compat is disabled
+                if (suCompatDisabled) {
+                    if (suSFS == "Supported" && susSUMode == "2") {
+                        true
                     } else {
-                        Icon(destination.iconNotSelected, stringResource(destination.label))
+                        // hide SuperUser and Module
+                        it != BottomBarDestination.SuperUser && it != BottomBarDestination.Module
                     }
-                },
-                label = { Text(stringResource(destination.label)) },
-                alwaysShowLabel = true
-            )
-        }
+                } else true
+            }
+            .forEach { destination ->
+                if (!fullFeatured && destination.rootRequired) return@forEach
+                val isCurrentDestOnBackStack by navController.isRouteOnBackStackAsState(destination.direction)
+                NavigationBarItem(
+                    selected = isCurrentDestOnBackStack,
+                    onClick = {
+                        if (isCurrentDestOnBackStack) {
+                            navigator.popBackStack(destination.direction, false)
+                        }
+                        navigator.navigate(destination.direction) {
+                            popUpTo(NavGraphs.root) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    icon = {
+                        if (isCurrentDestOnBackStack) {
+                            Icon(destination.iconSelected, stringResource(destination.label))
+                        } else {
+                            Icon(destination.iconNotSelected, stringResource(destination.label))
+                        }
+                    },
+                    label = { Text(stringResource(destination.label)) },
+                    alwaysShowLabel = true
+                )
+            }
     }
 }

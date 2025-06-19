@@ -291,15 +291,6 @@ fun ModuleScreen(navigator: DestinationsNavigator) {
         floatingActionButton = {
             if (!hideInstallButton) {
                 val moduleInstall = stringResource(id = R.string.module_install)
-                val confirmTitle = stringResource(R.string.module)
-                var zipUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
-                val confirmDialog = rememberConfirmDialog(onConfirm = {
-                    if (viewModel.zipUris.isNotEmpty()) {
-                        navigator.navigate(FlashScreenDestination(FlashIt.FlashModules(viewModel.zipUris)))
-                        viewModel.clearZipUris()
-                        viewModel.markNeedRefresh()
-                    }
-                })
                 val selectZipLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
                 ) { result ->
@@ -322,19 +313,9 @@ fun ModuleScreen(navigator: DestinationsNavigator) {
 
                     viewModel.updateZipUris(uris)
 
-                    // Show confirm dialog with selected zip file(s) name(s)
-                    val moduleNames =
-                        uris.mapIndexed { index, uri -> "\n${index + 1}. ${uri.getFileName(context)}" }
-                            .joinToString("")
-                    val confirmContent =
-                        context.getString(R.string.module_install_prompt_with_name, moduleNames)
-                    zipUris = uris
-                    confirmDialog.showConfirm(
-                        title = confirmTitle,
-                        content = confirmContent,
-                        markdown = true
-                    )
-
+                    navigator.navigate(FlashScreenDestination(FlashIt.FlashModules(uris)))
+                    viewModel.clearZipUris()
+                    viewModel.markNeedRefresh()
                 }
 
                 ExtendedFloatingActionButton(
@@ -848,7 +829,7 @@ fun ModuleItem(
                                     LabelItem(
                                         text = stringResource(R.string.module_update),
                                         style = com.dergoogler.mmrl.ui.component.LabelItemDefaults.style.copy(
-                                            containerColor = MaterialTheme.colorScheme.onTertiary,
+                                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                                             contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                                         )
                                     )

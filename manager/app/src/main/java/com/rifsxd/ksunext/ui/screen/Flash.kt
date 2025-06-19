@@ -63,6 +63,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
 import com.rifsxd.ksunext.R
+import com.rifsxd.ksunext.ui.component.rememberConfirmDialog
+import com.rifsxd.ksunext.ui.component.ConfirmResult
 import com.rifsxd.ksunext.ui.component.KeyEventBlocker
 import com.rifsxd.ksunext.ui.util.FlashResult
 import com.rifsxd.ksunext.ui.util.LkmSelection
@@ -77,10 +79,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.ui.platform.LocalContext
+import android.app.Activity
+
 enum class FlashingStatus {
     FLASHING,
     SUCCESS,
     FAILED
+}
+
+fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 // Lets you flash modules sequentially when mutiple zipUris are selected
@@ -106,7 +117,11 @@ fun flashModulesSequentially(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Destination<RootGraph>
-fun FlashScreen(navigator: DestinationsNavigator, flashIt: FlashIt) {
+fun FlashScreen(
+    navigator: DestinationsNavigator,
+    flashIt: FlashIt,
+    finishIntent: Boolean = false
+) {
 
     var text by rememberSaveable { mutableStateOf("") }
     var tempText: String
@@ -126,6 +141,8 @@ fun FlashScreen(navigator: DestinationsNavigator, flashIt: FlashIt) {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val developerOptionsEnabled = prefs.getBoolean("enable_developer_options", false)
 
+    val activity = context.findActivity()
+
     val view = LocalView.current
     DisposableEffect(flashing) {
         view.keepScreenOn = flashing == FlashingStatus.FLASHING
@@ -134,16 +151,49 @@ fun FlashScreen(navigator: DestinationsNavigator, flashIt: FlashIt) {
         }
     }
 
-    BackHandler(enabled = flashing == FlashingStatus.FLASHING) {
-        // Disable back button if flashing is running
+    BackHandler(enabled = flashing != FlashingStatus.FLASHING) {
+        navigator.popBackStack()
+        if (finishIntent) activity?.finish()
     }
 
-    LaunchedEffect(Unit) {
-        if (text.isNotEmpty()) {
-            return@LaunchedEffect
+    val confirmDialog = rememberConfirmDialog()
+    var confirmed by rememberSaveable { mutableStateOf(flashIt !is FlashIt.FlashModules) }
+    var pendingFlashIt by rememberSaveable { mutableStateOf<FlashIt?>(null) }
+    var hasFlashed by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(flashIt) {
+        if (flashIt is FlashIt.FlashModules && !confirmed) {
+            val uris = flashIt.uris
+            val moduleNames =
+                uris.mapIndexed { index, uri -> "\n${index + 1}. ${uri.getFileName(context)}" }
+                    .joinToString("")
+            val confirmContent =
+                context.getString(R.string.module_install_prompt_with_name, moduleNames)
+            val confirmTitle = context.getString(R.string.module)
+            val result = confirmDialog.awaitConfirm(
+                title = confirmTitle,
+                content = confirmContent,
+                markdown = true
+            )
+            if (result == ConfirmResult.Confirmed) {
+                confirmed = true
+                pendingFlashIt = flashIt
+            } else {
+                // User cancelled, go back
+                navigator.popBackStack()
+                if (finishIntent) activity?.finish()
+            }
+        } else {
+            confirmed = true
+            pendingFlashIt = flashIt
         }
+    }
+
+    LaunchedEffect(confirmed, pendingFlashIt) {
+        if (!confirmed || pendingFlashIt == null || text.isNotEmpty() || hasFlashed) return@LaunchedEffect
+        hasFlashed = true
         withContext(Dispatchers.IO) {
-            flashIt(flashIt, onStdout = {
+            flashIt(pendingFlashIt!!, onStdout = {
                 tempText = "$it\n"
                 if (tempText.startsWith("[H[J")) { // clear command
                     text = tempText.substring(6)
@@ -172,6 +222,7 @@ fun FlashScreen(navigator: DestinationsNavigator, flashIt: FlashIt) {
                 flashing,
                 onBack = dropUnlessResumed {
                     navigator.popBackStack()
+                    if (finishIntent) activity?.finish()
                 },
                 onSave = {
                     scope.launch {
@@ -211,6 +262,7 @@ fun FlashScreen(navigator: DestinationsNavigator, flashIt: FlashIt) {
                     icon = { Icon(Icons.Filled.Close, contentDescription = null) },
                     onClick = {
                         navigator.popBackStack()
+                        if (finishIntent) activity?.finish()
                     }
                 )
             }
@@ -280,6 +332,19 @@ fun FlashScreen(navigator: DestinationsNavigator, flashIt: FlashIt) {
             )
         }
     }
+}
+
+fun Uri.getFileName(context: Context): String {
+    val contentResolver = context.contentResolver
+    val cursor = contentResolver.query(this, null, null, null, null)
+    return cursor?.use {
+        val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+        if (it.moveToFirst() && nameIndex != -1) {
+            it.getString(nameIndex)
+        } else {
+            this.lastPathSegment ?: "unknown.zip"
+        }
+    } ?: (this.lastPathSegment ?: "unknown.zip")
 }
 
 @Parcelize

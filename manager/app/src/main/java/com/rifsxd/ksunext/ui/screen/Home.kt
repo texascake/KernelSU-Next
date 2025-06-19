@@ -8,8 +8,12 @@ import android.os.Looper
 import android.system.Os
 import android.widget.Toast
 import androidx.annotation.StringRes
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -193,6 +197,19 @@ fun RebootDropdownItem(@StringRes id: Int, reason: String = "") {
     })
 }
 
+@Composable
+fun getSeasonalIcon(): ImageVector {
+    val month = Calendar.getInstance().get(Calendar.MONTH) // 0-11 for January-December
+    return when (month) {
+        Calendar.DECEMBER, Calendar.JANUARY, Calendar.FEBRUARY -> Icons.Filled.AcUnit // Winter
+        Calendar.MARCH, Calendar.APRIL, Calendar.MAY -> Icons.Filled.Spa // Spring
+        Calendar.JUNE, Calendar.JULY, Calendar.AUGUST -> Icons.Filled.WbSunny // Summer
+        Calendar.SEPTEMBER, Calendar.OCTOBER, Calendar.NOVEMBER -> Icons.Filled.Forest // Fall
+        else -> Icons.Filled.Whatshot // Fallback icon
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopBar(
@@ -201,8 +218,42 @@ private fun TopBar(
     onInstallClick: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior? = null
 ) {
+    var isSpinning by remember { mutableStateOf(false) }
+    val rotation by animateFloatAsState(
+        targetValue = if (isSpinning) 360f else 0f,
+        animationSpec = tween(durationMillis = 800),
+        finishedListener = {
+            isSpinning = false
+        }
+    )
+
+    LaunchedEffect(Unit) {
+        isSpinning = true
+    }
+
     TopAppBar(
-        title = { Text(stringResource(R.string.app_name)) },
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {
+                    if (!isSpinning) isSpinning = true
+                }
+            ) {
+                Icon(
+                    imageVector = getSeasonalIcon(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .graphicsLayer {
+                            rotationZ = rotation
+                        }
+                )
+                Text(stringResource(R.string.app_name))
+            }
+        },
         actions = {
             if (ksuVersion != null) {
                 if (kernelVersion.isGKI()) {
@@ -249,17 +300,6 @@ private fun TopBar(
     )
 }
 
-@Composable
-fun getSeasonalIcon(): ImageVector {
-    val month = Calendar.getInstance().get(Calendar.MONTH) // 0-11 for January-December
-    return when (month) {
-        Calendar.DECEMBER, Calendar.JANUARY, Calendar.FEBRUARY -> Icons.Filled.AcUnit // Winter
-        Calendar.MARCH, Calendar.APRIL, Calendar.MAY -> Icons.Filled.Spa // Spring
-        Calendar.JUNE, Calendar.JULY, Calendar.AUGUST -> Icons.Filled.WbSunny // Summer
-        Calendar.SEPTEMBER, Calendar.OCTOBER, Calendar.NOVEMBER -> Icons.Filled.Forest // Fall
-        else -> Icons.Filled.Whatshot // Fallback icon
-    }
-}
 
 @Composable
 private fun StatusCard(
@@ -312,7 +352,7 @@ private fun StatusCard(
                     }
 
                     Icon(
-                        getSeasonalIcon(), // Use dynamic seasonal icon
+                        imageVector = Icons.Filled.CheckCircle,
                         contentDescription = stringResource(R.string.home_working)
                     )
                     Column(
@@ -322,25 +362,49 @@ private fun StatusCard(
                         val labelStyle = LabelItemDefaults.style
                         TextRow(
                             trailingContent = {
-                                LabelItem(
-                                    icon = if (Natives.isSafeMode) {
-                                        {
-                                            Icon(
-                                                tint = labelStyle.contentColor,
-                                                imageVector = Icons.Filled.Security,
-                                                contentDescription = null
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    LabelItem(
+                                        icon = if (Natives.isSafeMode) {
+                                            {
+                                                Icon(
+                                                    tint = labelStyle.contentColor,
+                                                    imageVector = Icons.Filled.Security,
+                                                    contentDescription = null
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        text = {
+                                            Text(
+                                                text = workingMode,
+                                                style = labelStyle.textStyle.copy(color = labelStyle.contentColor),
                                             )
                                         }
-                                    } else {
-                                        null
-                                    },
-                                    text = {
-                                        Text(
-                                            text = workingMode,
-                                            style = labelStyle.textStyle.copy(color = labelStyle.contentColor),
+                                    )
+                                    if (isSuCompatDisabled()) {
+                                        LabelItem(
+                                            icon = {
+                                                Icon(
+                                                    tint = labelStyle.contentColor,
+                                                    imageVector = Icons.Filled.Warning,
+                                                    contentDescription = null
+                                                )
+                                            },
+                                            text = {
+                                                Text(
+                                                    text = stringResource(R.string.sucompat_disabled),
+                                                    style = labelStyle.textStyle.copy(
+                                                        color = labelStyle.contentColor,
+                                                    )
+                                                )
+                                            }
                                         )
                                     }
-                                )
+                                }
                             }
                         ) {
                             Text(
@@ -384,7 +448,7 @@ private fun StatusCard(
                 }
 
                 kernelVersion.isGKI() -> {
-                    Icon(Icons.Filled.Report, stringResource(R.string.home_not_installed))
+                    Icon(Icons.Filled.NewReleases, stringResource(R.string.home_not_installed))
                     Column(Modifier.padding(start = 20.dp)) {
                         Text(
                             text = stringResource(R.string.home_not_installed),
@@ -399,7 +463,7 @@ private fun StatusCard(
                 }
 
                 else -> {
-                    Icon(Icons.Filled.Dangerous, stringResource(R.string.home_failure))
+                    Icon(Icons.Filled.Cancel, stringResource(R.string.home_failure))
                     Column(Modifier.padding(start = 20.dp)) {
                         Text(
                             text = stringResource(R.string.home_failure),
