@@ -28,6 +28,7 @@ import java.io.File
  * @date 2023/1/1.
  */
 private const val TAG = "KsuCli"
+private const val BUSYBOX = "/data/adb/ksu/bin/busybox"
 
 private fun ksuDaemonMagicPath(): String {
     return ksuApp.applicationInfo.nativeLibraryDir + File.separator + "libksud_magic.so"
@@ -102,7 +103,10 @@ fun Uri.getFileName(context: Context): String? {
 
 fun createRootShell(globalMnt: Boolean = false): Shell {
     Shell.enableVerboseLogging = BuildConfig.DEBUG
-    val builder = Shell.Builder.create()
+    val builder = Shell.Builder.create().apply {
+        setFlags(Shell.FLAG_MOUNT_MASTER)
+    }
+
     return try {
         if (globalMnt) {
             builder.build(ksuDaemonMagicPath(), "debug", "su", "-g")
@@ -402,6 +406,22 @@ fun hasMagisk(): Boolean {
     return result.isSuccess
 }
 
+fun isGlobalNamespaceEnabled(): Boolean {
+    val shell = getRootShell()
+    val result =
+        ShellUtils.fastCmd(shell, "nsenter --mount=/proc/1/ns/mnt cat ${Natives.GLOBAL_NAMESPACE_FILE}")
+    Log.i(TAG, "is global namespace enabled: $result")
+    return result == "1"
+}
+
+fun setGlobalNamespaceEnabled(value: String) {
+    getRootShell().newJob()
+        .add("nsenter --mount=/proc/1/ns/mnt echo $value > ${Natives.GLOBAL_NAMESPACE_FILE}")
+        .submit { result ->
+            Log.i(TAG, "setGlobalNamespaceEnabled result: ${result.isSuccess} [${result.out}]")
+        }
+}
+
 fun isSepolicyValid(rules: String?): Boolean {
     if (rules == null) {
         return true
@@ -459,7 +479,7 @@ fun getFileName(context: Context, uri: Uri): String {
 
 fun moduleBackupDir(): String? {
     val shell = getRootShell()
-    val baseBackupDir = "/sdcard/.ksunext/modules"
+    val baseBackupDir = "/data/adb/ksu/backup/modules"
     val resultBase = ShellUtils.fastCmd(shell, "mkdir -p $baseBackupDir").trim()
     if (resultBase.isNotEmpty()) return null
 
@@ -487,10 +507,10 @@ fun moduleBackup(): Boolean {
 
     val tarName = "modules_backup_$timestamp.tar"
     val tarPath = "/data/local/tmp/$tarName"
-    val internalBackupDir = "/sdcard/.ksunext/modules"
+    val internalBackupDir = "/data/adb/ksu/backup/modules"
     val internalBackupPath = "$internalBackupDir/$tarName"
 
-    val tarCmd = "tar -cpf $tarPath -C /data/adb/modules $(ls /data/adb/modules)"
+    val tarCmd = "$BUSYBOX tar -cpf $tarPath -C /data/adb/modules $(ls /data/adb/modules)"
     val tarResult = ShellUtils.fastCmd(shell, tarCmd).trim()
     if (tarResult.isNotEmpty()) return false
 
@@ -507,11 +527,11 @@ fun moduleBackup(): Boolean {
 fun moduleRestore(): Boolean {
     val shell = getRootShell()
 
-    val findTarCmd = "ls -t /sdcard/.ksunext/modules/modules_backup_*.tar 2>/dev/null | head -n 1"
+    val findTarCmd = "ls -t /data/adb/ksu/backup/modules/modules_backup_*.tar 2>/dev/null | head -n 1"
     val tarPath = ShellUtils.fastCmd(shell, findTarCmd).trim()
     if (tarPath.isEmpty()) return false
 
-    val extractCmd = "tar -xpf $tarPath -C /data/adb/modules_update"
+    val extractCmd = "$BUSYBOX tar -xpf $tarPath -C /data/adb/modules_update"
     val extractResult = ShellUtils.fastCmd(shell, extractCmd).trim()
     return extractResult.isEmpty()
 }
@@ -530,10 +550,10 @@ fun allowlistBackup(): Boolean {
 
     val tarName = "allowlist_backup_$timestamp.tar"
     val tarPath = "/data/local/tmp/$tarName"
-    val internalBackupDir = "/sdcard/.ksunext/allowlist"
+    val internalBackupDir = "/data/adb/ksu/backup/allowlist"
     val internalBackupPath = "$internalBackupDir/$tarName"
 
-    val tarCmd = "tar -cpf $tarPath -C /data/adb/ksu .allowlist"
+    val tarCmd = "$BUSYBOX tar -cpf $tarPath -C /data/adb/ksu .allowlist"
     val tarResult = ShellUtils.fastCmd(shell, tarCmd).trim()
     if (tarResult.isNotEmpty()) return false
 
@@ -550,13 +570,13 @@ fun allowlistBackup(): Boolean {
 fun allowlistRestore(): Boolean {
     val shell = getRootShell()
 
-    // Find the latest allowlist tar backup in /sdcard/.ksunext/allowlist
-    val findTarCmd = "ls -t /sdcard/.ksunext/allowlist/allowlist_backup_*.tar 2>/dev/null | head -n 1"
+    // Find the latest allowlist tar backup in /data/adb/ksu/backup/allowlist
+    val findTarCmd = "ls -t /data/adb/ksu/backup/allowlist/allowlist_backup_*.tar 2>/dev/null | head -n 1"
     val tarPath = ShellUtils.fastCmd(shell, findTarCmd).trim()
     if (tarPath.isEmpty()) return false
 
     // Extract the tar to /data/adb/ksu (restores .allowlist folder with permissions)
-    val extractCmd = "tar -xpf $tarPath -C /data/adb/ksu"
+    val extractCmd = "$BUSYBOX tar -xpf $tarPath -C /data/adb/ksu"
     val extractResult = ShellUtils.fastCmd(shell, extractCmd).trim()
     return extractResult.isEmpty()
 }
@@ -590,9 +610,16 @@ fun getSuSFSVariant(): String {
     val result = ShellUtils.fastCmd(shell, "${getSuSFSDaemonPath()} variant")
     return result
 }
+
 fun getSuSFSFeatures(): String {
     val shell = getRootShell()
     val result = ShellUtils.fastCmd(shell, "${getSuSFSDaemonPath()} features")
+    return result
+}
+
+fun hasSuSFs_SUS_SU(): String {
+    val shell = getRootShell()
+    val result = ShellUtils.fastCmd(shell, "${getSuSFSDaemonPath()} sus_su support")
     return result
 }
 
@@ -623,13 +650,21 @@ fun currentMountSystem(): String {
 
 fun getModuleSize(dir: File): Long {
     val shell = getRootShell()
-    val cmd = "du -sb '${dir.absolutePath}' | awk '{print \$1}'"
+    val cmd = "$BUSYBOX du -sb '${dir.absolutePath}' | awk '{print \$1}'"
     val result = ShellUtils.fastCmd(shell, cmd).trim()
     return result.toLongOrNull() ?: 0L
 }
 
 fun isSuCompatDisabled(): Boolean {
     return Natives.version >= Natives.MINIMAL_SUPPORTED_SU_COMPAT && !Natives.isSuEnabled()
+}
+
+fun zygiskRequired(dir: File): Boolean {
+    val shell = getRootShell()
+    val zygiskLib = "${dir.absolutePath}/zygisk"
+    val cmd = "ls \"$zygiskLib\""
+    val result = ShellUtils.fastCmdResult(shell, cmd)
+    return result
 }
 
 fun setAppProfileTemplate(id: String, template: String): Boolean {

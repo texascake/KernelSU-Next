@@ -35,6 +35,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,7 +56,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import com.dergoogler.mmrl.platform.Platform
 import com.maxkeppeker.sheets.core.models.base.Header
 import com.maxkeppeker.sheets.core.models.base.IconSource
 import com.maxkeppeker.sheets.core.models.base.rememberUseCaseState
@@ -87,6 +88,8 @@ import com.rifsxd.ksunext.ui.component.rememberLoadingDialog
 import com.rifsxd.ksunext.ui.util.LocalSnackbarHost
 import com.rifsxd.ksunext.ui.util.getBugreportFile
 import com.rifsxd.ksunext.ui.util.*
+import com.rifsxd.ksunext.ui.util.isGlobalNamespaceEnabled
+import com.rifsxd.ksunext.ui.util.setGlobalNamespaceEnabled
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -100,6 +103,8 @@ import java.time.format.DateTimeFormatter
 fun SettingScreen(navigator: DestinationsNavigator) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
     val snackBarHost = LocalSnackbarHost.current
+    var isGlobalNamespaceEnabled by rememberSaveable { mutableStateOf(false) }
+    isGlobalNamespaceEnabled = isGlobalNamespaceEnabled()
 
     val isManager = Natives.becomeManager(ksuApp.packageName)
     val ksuVersion = if (isManager) Natives.version else null
@@ -149,7 +154,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
             if (ksuVersion != null) {
                 ListItem(
                     leadingContent = { Icon(Icons.Filled.Fence, profileTemplate) },
-                    headlineContent = { Text(profileTemplate) },
+                    headlineContent = { Text(
+                        text = profileTemplate,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    ) },
                     supportingContent = { Text(stringResource(id = R.string.settings_profile_template_summary)) },
                     modifier = Modifier.clickable {
                         navigator.navigate(AppProfileTemplateScreenDestination)
@@ -191,14 +200,31 @@ fun SettingScreen(navigator: DestinationsNavigator) {
                         }
                     }
                 }
+                
+                SwitchItem(
+                    icon = Icons.Filled.Engineering,
+                    title = stringResource(id = R.string.settings_global_namespace_mode),
+                    summary = stringResource(id = R.string.settings_global_namespace_mode_summary),
+                    checked = isGlobalNamespaceEnabled,
+                    onCheckedChange = {
+                        setGlobalNamespaceEnabled(
+                            if (isGlobalNamespaceEnabled) {
+                                "0"
+                            } else {
+                                "1"
+                            }
+                        )
+                        isGlobalNamespaceEnabled = it
+                    }
+                )
             }
 
             val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
             val suSFS = getSuSFS()
-            val isSUS_SU = getSuSFSFeatures()
+            val isSUS_SU = hasSuSFs_SUS_SU() == "Supported"
             if (suSFS == "Supported") {
-                if (isSUS_SU == "CONFIG_KSU_SUSFS_SUS_SU") {
+                if (isSUS_SU) {
                     var isEnabled by rememberSaveable {
                         mutableStateOf(susfsSUS_SU_Mode() == "2")
                     }
@@ -260,7 +286,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
             if (showRebootDialog) {
                 AlertDialog(
                     onDismissRequest = { showRebootDialog = false },
-                    title = { Text(stringResource(R.string.reboot_required)) },
+                    title = { Text(
+                        text = stringResource(R.string.reboot_required),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold
+                    ) },
                     text = { Text(stringResource(R.string.reboot_message)) },
                     confirmButton = {
                         TextButton(onClick = {
@@ -304,7 +334,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
                             shrink
                         )
                     },
-                    headlineContent = { Text(shrink) },
+                    headlineContent = { Text(
+                        text = shrink,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    ) },
                     modifier = Modifier.clickable {
                         scope.launch {
                             val result = shrinkDialog.awaitConfirm(title = shrink, content = shrinkMessage)
@@ -326,7 +360,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
                         customization
                     )
                 },
-                headlineContent = { Text(customization) },
+                headlineContent = { Text(
+                    text = customization,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                ) },
                 modifier = Modifier.clickable {
                     navigator.navigate(CustomizationScreenDestination)
                 }
@@ -341,7 +379,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
                             backupRestore
                         )
                     },
-                    headlineContent = { Text(backupRestore) },
+                    headlineContent = { Text(
+                        text = backupRestore,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    ) },
                     modifier = Modifier.clickable {
                         navigator.navigate(BackupRestoreScreenDestination)
                     }
@@ -349,18 +391,24 @@ fun SettingScreen(navigator: DestinationsNavigator) {
             }
 
             val developer = stringResource(id = R.string.developer)
-            ListItem(
-                leadingContent = {
-                    Icon(
-                        Icons.Filled.DeveloperBoard,
-                        developer
-                    )
-                },
-                headlineContent = { Text(developer) },
-                modifier = Modifier.clickable {
-                    navigator.navigate(DeveloperScreenDestination)
-                }
-            )
+            if (ksuVersion != null) {
+                ListItem(
+                    leadingContent = {
+                        Icon(
+                            Icons.Filled.DeveloperBoard,
+                            developer
+                        )
+                    },
+                    headlineContent = { Text(
+                        text = developer,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    ) },
+                    modifier = Modifier.clickable {
+                        navigator.navigate(DeveloperScreenDestination)
+                    }
+                )
+            }
 
             val lkmMode = Natives.version >= Natives.MINIMAL_SUPPORTED_KERNEL_LKM && Natives.isLkmMode
             if (lkmMode) {
@@ -378,7 +426,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
                         stringResource(id = R.string.export_log)
                     )
                 },
-                headlineContent = { Text(stringResource(id = R.string.export_log)) },
+                headlineContent = { Text(
+                    text = stringResource(id = R.string.export_log),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                ) },
                 modifier = Modifier.clickable {
                     showBottomsheet = true
                 }
@@ -486,7 +538,11 @@ fun SettingScreen(navigator: DestinationsNavigator) {
                         about
                     )
                 },
-                headlineContent = { Text(about) },
+                headlineContent = { Text(
+                    text = about,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                ) },
                 modifier = Modifier.clickable {
                     aboutDialog.show()
                 }
@@ -536,7 +592,11 @@ fun UninstallItem(
                 uninstall
             )
         },
-        headlineContent = { Text(uninstall) },
+        headlineContent = { Text(
+            text = uninstall,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        ) },
         modifier = Modifier.clickable {
             uninstallDialog.show()
         }
@@ -603,7 +663,11 @@ private fun TopBar(
     scrollBehavior: TopAppBarScrollBehavior? = null,
 ) {
     TopAppBar(
-        title = { Text(stringResource(R.string.settings)) },
+        title = { Text(
+            text = stringResource(R.string.settings),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Black,
+        ) },
         windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         scrollBehavior = scrollBehavior
     )
